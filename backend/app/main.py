@@ -1,0 +1,260 @@
+"""FastAPI application for Homelab Telemetry & Operations Control Panel."""
+
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+import json
+from typing import Any, Dict, List, Optional
+
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.auth import create_admin_token, require_admin, verify_admin_pin
+from app.database import get_db, init_db
+from app.dokploy_client import fetch_dokploy_snapshot
+from app.models import RffmUserModel, TelemetryEventModel
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Initialize database tables on startup."""
+    init_db()
+    yield
+
+
+app = FastAPI(
+    title="Homelab Pulse Telemetry API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class TelemetryEventPayload(BaseModel):
+    """Incoming telemetry event from any homelab application."""
+
+    app_id: str = Field(..., min_length=2, max_length=32)
+    event_type: str = Field(..., min_length=2, max_length=64)
+    visitor_id: str = Field(..., min_length=4, max_length=128)
+    user_email: Optional[str] = Field(default=None, max_length=255)
+    path: Optional[str] = Field(default=None, max_length=255)
+    metadata: Optional[Dict[str, Any]] = Field(default=None)
+
+
+class PinRequest(BaseModel):
+    """PIN verification request payload."""
+
+    pin: str = Field(..., min_length=4, max_length=16)
+
+
+@app.get("/health")
+@app.get("/api/health")
+def health_check() -> Dict[str, str]:
+    """Liveness check endpoint."""
+    return {"status": "ok"}
+
+
+@app.post("/api/auth/verify-pin")
+def verify_pin_endpoint(payload: PinRequest) -> Dict[str, str]:
+    """Verify the 4-digit admin PIN and return a signed JWT."""
+    if not verify_admin_pin(payload.pin):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="PIN de administrador incorrecto.",
+        )
+    return {"access_token": create_admin_token(), "token_type": "bearer"}
+
+
+@app.post("/api/events", status_code=status.HTTP_201_CREATED)
+def ingest_event(
+    payload: TelemetryEventPayload,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Store an incoming telemetry event."""
+    meta_str = json.dumps(payload.metadata, ensure_ascii=False) if payload.metadata else None
+    ev = TelemetryEventModel(
+        app_id=payload.app_id.strip().lower(),
+        event_type=payload.event_type.strip().lower(),
+        visitor_id=payload.visitor_id.strip(),
+        user_email=payload.user_email.strip().lower() if payload.user_email else None,
+        path=payload.path.strip()[:255] if payload.path else None,
+        metadata_json=meta_str,
+    )
+    db.add(ev)
+    db.commit()
+    db.refresh(ev)
+    return {"ok": True, "id": ev.id}
+
+
+def _safe_parse_meta(raw: Optional[str]) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _serialize_event(ev: TelemetryEventModel) -> Dict[str, Any]:
+    return {
+        "id": ev.id,
+        "app_id": ev.app_id,
+        "event_type": ev.event_type,
+        "visitor_id": ev.visitor_id,
+        "user_email": ev.user_email,
+        "path": ev.path,
+        "metadata": _safe_parse_meta(ev.metadata_json),
+        "created_at": ev.created_at.isoformat(),
+    }
+
+
+def _count_optional_table(db: Session, table_name: str) -> int:
+    try:
+        res = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar()
+        return int(res or 0)
+    except Exception:
+        db.rollback()
+        return 0
+
+
+def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+@app.get("/api/dashboard/overview")
+def get_dashboard_overview(
+    _admin: Dict[str, Any] = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Return full operational and product analytics for Dokploy, FutMad, and GeoRisk."""
+    now = datetime.now(timezone.utc)
+    cutoff_24h = now - timedelta(hours=24)
+
+    # 1. FutMad registered users from shared rffm_db
+    users_raw: List[RffmUserModel] = []
+    try:
+        users_raw = db.query(RffmUserModel).all()
+    except Exception:
+        db.rollback()
+
+    users_raw.sort(
+        key=lambda u: _ensure_utc(u.last_login_at) or _ensure_utc(u.created_at) or now,
+        reverse=True,
+    )
+    active_users_24h = sum(
+        1
+        for u in users_raw
+        if (_ensure_utc(u.last_login_at) or _ensure_utc(u.created_at))
+        and (_ensure_utc(u.last_login_at) or _ensure_utc(u.created_at)) >= cutoff_24h
+    )
+    users_list = [
+        {
+            "id": u.id,
+            "email": u.email,
+            "name": u.name,
+            "auth_provider": u.auth_provider,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+        }
+        for u in users_raw
+    ]
+    fav_teams_count = _count_optional_table(db, "favorite_teams")
+    fav_campos_count = _count_optional_table(db, "favorite_campos")
+
+    # 2. Telemetry events for FutMad & GeoRisk
+    all_events = (
+        db.query(TelemetryEventModel)
+        .order_by(TelemetryEventModel.created_at.desc())
+        .limit(1500)
+        .all()
+    )
+
+    futmad_events = [e for e in all_events if e.app_id == "futmad"]
+    georisk_events = [e for e in all_events if e.app_id == "georisk"]
+
+    futmad_visitors_all = {e.visitor_id for e in futmad_events}
+    futmad_visitors_24h = {
+        e.visitor_id
+        for e in futmad_events
+        if _ensure_utc(e.created_at) and _ensure_utc(e.created_at) >= cutoff_24h
+    }
+    futmad_by_type: Dict[str, int] = {}
+    for e in futmad_events:
+        futmad_by_type[e.event_type] = futmad_by_type.get(e.event_type, 0) + 1
+
+    georisk_visitors_all = {e.visitor_id for e in georisk_events}
+    georisk_visitors_24h = {
+        e.visitor_id
+        for e in georisk_events
+        if _ensure_utc(e.created_at) and _ensure_utc(e.created_at) >= cutoff_24h
+    }
+    georisk_by_type: Dict[str, int] = {}
+    unlock_by_plan: Dict[str, int] = {"SINGLE_REPORT_699": 0, "PACK_3_1490": 0}
+    georisk_errors: List[Dict[str, Any]] = []
+
+    for e in georisk_events:
+        georisk_by_type[e.event_type] = georisk_by_type.get(e.event_type, 0) + 1
+        meta = _safe_parse_meta(e.metadata_json)
+        if e.event_type == "unlock_click":
+            plan = str(meta.get("plan_type") or "SINGLE_REPORT_699")
+            unlock_by_plan[plan] = unlock_by_plan.get(plan, 0) + 1
+        if "error" in e.event_type:
+            georisk_errors.append(_serialize_event(e))
+
+    total_errors_24h = sum(
+        1
+        for e in all_events
+        if "error" in e.event_type
+        and _ensure_utc(e.created_at)
+        and _ensure_utc(e.created_at) >= cutoff_24h
+    )
+
+    return {
+        "generated_at": now.isoformat(),
+        "global_kpis": {
+            "total_registered_users": len(users_list),
+            "active_users_24h": active_users_24h,
+            "unique_visitors_24h": len(futmad_visitors_24h | georisk_visitors_24h),
+            "total_events_logged": len(all_events),
+            "errors_24h": total_errors_24h,
+        },
+        "dokploy": fetch_dokploy_snapshot(),
+        "futmad": {
+            "registered_users_total": len(users_list),
+            "active_users_24h": active_users_24h,
+            "favorite_teams_total": fav_teams_count,
+            "favorite_campos_total": fav_campos_count,
+            "unique_visitors_total": len(futmad_visitors_all),
+            "unique_visitors_24h": len(futmad_visitors_24h),
+            "sessions_total": futmad_by_type.get("session_start", 0),
+            "events_by_type": futmad_by_type,
+            "users": users_list,
+            "recent_events": [_serialize_event(e) for e in futmad_events[:25]],
+        },
+        "georisk": {
+            "unique_visitors_total": len(georisk_visitors_all),
+            "unique_visitors_24h": len(georisk_visitors_24h),
+            "page_views_total": georisk_by_type.get("page_view", 0),
+            "property_searches_total": georisk_by_type.get("search_property", 0),
+            "unlock_clicks_total": georisk_by_type.get("unlock_click", 0),
+            "unlock_by_plan": unlock_by_plan,
+            "errors_total": len(georisk_errors),
+            "events_by_type": georisk_by_type,
+            "recent_errors": georisk_errors[:25],
+            "recent_events": [_serialize_event(e) for e in georisk_events[:25]],
+        },
+    }
