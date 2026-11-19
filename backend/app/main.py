@@ -196,7 +196,7 @@ def get_dashboard_overview(
     for e in futmad_events:
         futmad_by_type[e.event_type] = futmad_by_type.get(e.event_type, 0) + 1
 
-    # Daily accesses breakdown (last 14 days) for FutMad: Anonymous vs Registered
+    # Daily accesses & registrations breakdown (last 14 days) for FutMad
     daily_map: Dict[str, Dict[str, Any]] = {}
     for days_ago in range(13, -1, -1):
         day_str = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
@@ -204,6 +204,7 @@ def get_dashboard_overview(
             "date": day_str,
             "anonymous_accesses": 0,
             "registered_accesses": 0,
+            "new_registrations": 0,
             "anonymous_visitors": set(),
             "registered_users": set(),
         }
@@ -218,6 +219,7 @@ def get_dashboard_overview(
                 "date": day_str,
                 "anonymous_accesses": 0,
                 "registered_accesses": 0,
+                "new_registrations": 0,
                 "anonymous_visitors": set(),
                 "registered_users": set(),
             }
@@ -232,10 +234,24 @@ def get_dashboard_overview(
             if e.event_type == "session_start":
                 bucket["anonymous_accesses"] += 1
 
-    # Also reflect registered users' created_at / last_login_at dates so historical days appear
+    # Also reflect registered users' created_at (registrations per day) and last_login_at
     for u in users_raw:
         email_clean = u.email.strip().lower()
-        for ts in (_ensure_utc(u.created_at), _ensure_utc(u.last_login_at)):
+        created_ts = _ensure_utc(u.created_at)
+        if created_ts:
+            c_day = created_ts.strftime("%Y-%m-%d")
+            if c_day not in daily_map:
+                daily_map[c_day] = {
+                    "date": c_day,
+                    "anonymous_accesses": 0,
+                    "registered_accesses": 0,
+                    "new_registrations": 0,
+                    "anonymous_visitors": set(),
+                    "registered_users": set(),
+                }
+            daily_map[c_day]["new_registrations"] += 1
+
+        for ts in (created_ts, _ensure_utc(u.last_login_at)):
             if not ts:
                 continue
             day_str = ts.strftime("%Y-%m-%d")
@@ -244,6 +260,7 @@ def get_dashboard_overview(
                     "date": day_str,
                     "anonymous_accesses": 0,
                     "registered_accesses": 0,
+                    "new_registrations": 0,
                     "anonymous_visitors": set(),
                     "registered_users": set(),
                 }
@@ -261,6 +278,7 @@ def get_dashboard_overview(
             "date": day_str,
             "anonymous_accesses": anon_acc,
             "registered_accesses": reg_acc,
+            "new_registrations": b["new_registrations"],
             "anonymous_unique": len(b["anonymous_visitors"]),
             "registered_unique": len(b["registered_users"]),
             "total_accesses": anon_acc + reg_acc,

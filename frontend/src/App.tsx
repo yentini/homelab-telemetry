@@ -343,15 +343,18 @@ export function App() {
               </div>
             </div>
 
-            {/* Accesos por Día: Personas Anónimas vs Personas Registradas (Modo Gráfico y Modo Lista) */}
+            {/* Accesos y Registros por Día: Personas Anónimas, Registradas y Nuevas Altas */}
             {(() => {
               const daily = data.futmad.daily_accesses || [];
               const maxDayValue = Math.max(
                 1,
-                ...daily.map((d) => Math.max(d.anonymous_accesses, d.registered_accesses, 1))
+                ...daily.map((d) =>
+                  Math.max(d.anonymous_accesses, d.registered_accesses, d.new_registrations || 0, 1)
+                )
               );
               const totalAnon14d = daily.reduce((acc, d) => acc + d.anonymous_accesses, 0);
               const totalReg14d = daily.reduce((acc, d) => acc + d.registered_accesses, 0);
+              const totalSignups14d = daily.reduce((acc, d) => acc + (d.new_registrations || 0), 0);
               const reversedDaily = [...daily].reverse();
 
               const formatShortDay = (ymd: string) => {
@@ -370,12 +373,13 @@ export function App() {
                     <div>
                       <h3 className="text-sm font-bold text-white flex items-center gap-2">
                         <BarChart3 className="w-4 h-4 text-rose-400" />
-                        <span>Accesos por Día: Personas Anónimas vs Registradas (Últimos 14 días)</span>
+                        <span>Accesos y Nuevos Registros por Día (Últimos 14 días)</span>
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">
                         Acumulado 14 días:{' '}
-                        <strong className="text-sky-400">{totalAnon14d} anónimos</strong> ·{' '}
-                        <strong className="text-emerald-400">{totalReg14d} registrados</strong>
+                        <strong className="text-sky-400">{totalAnon14d} accesos anónimos</strong> ·{' '}
+                        <strong className="text-emerald-400">{totalReg14d} accesos registrados</strong> ·{' '}
+                        <strong className="text-amber-400">{totalSignups14d} nuevos registros</strong>
                       </p>
                     </div>
 
@@ -423,36 +427,42 @@ export function App() {
                   <div className="flex flex-wrap items-center gap-4 text-xs">
                     <span className="inline-flex items-center gap-1.5 text-sky-300 font-semibold">
                       <span className="w-3 h-3 rounded-sm bg-sky-400 inline-block" />
-                      Accesos Personas Anónimas (`visitor_id` sin sesión)
+                      Accesos Personas Anónimas
                     </span>
                     <span className="inline-flex items-center gap-1.5 text-emerald-300 font-semibold">
                       <span className="w-3 h-3 rounded-sm bg-emerald-400 inline-block" />
-                      Accesos Personas Registradas (cuenta autenticada)
+                      Accesos Personas Registradas
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-amber-300 font-semibold">
+                      <span className="w-3 h-3 rounded-sm bg-amber-400 inline-block" />
+                      Nuevos Registros (Altas por día)
                     </span>
                   </div>
 
                   {/* MODO GRÁFICO */}
                   {(futmadAccessView === 'both' || futmadAccessView === 'chart') && (
                     <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 pt-6 overflow-x-auto">
-                      <div className="min-w-[540px] h-48 flex items-end justify-between gap-2 pt-4 pb-2 border-b border-slate-800">
+                      <div className="min-w-[600px] h-48 flex items-end justify-between gap-2 pt-4 pb-2 border-b border-slate-800">
                         {daily.map((d) => {
+                          const signups = d.new_registrations || 0;
                           const anonHeightPct = Math.round(
                             (d.anonymous_accesses / maxDayValue) * 100
                           );
                           const regHeightPct = Math.round(
                             (d.registered_accesses / maxDayValue) * 100
                           );
+                          const signupHeightPct = Math.round((signups / maxDayValue) * 100);
                           return (
                             <div
                               key={d.date}
                               className="flex-1 flex flex-col items-center justify-end h-full group"
-                              title={`${formatFullDay(d.date)} · Anónimos: ${d.anonymous_accesses} · Registrados: ${d.registered_accesses}`}
+                              title={`${formatFullDay(d.date)} · Anónimos: ${d.anonymous_accesses} · Registrados: ${d.registered_accesses} · Nuevos Registros: ${signups}`}
                             >
-                              <div className="w-full flex items-end justify-center gap-1 h-36 px-0.5">
+                              <div className="w-full flex items-end justify-center gap-0.5 h-36 px-0.5">
                                 {/* Barra Anónimos */}
-                                <div className="flex-1 max-w-[16px] h-full flex flex-col justify-end items-center">
+                                <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
                                   {d.anonymous_accesses > 0 && (
-                                    <span className="text-[10px] font-mono font-bold text-sky-300 mb-0.5">
+                                    <span className="text-[9px] font-mono font-bold text-sky-300 mb-0.5">
                                       {d.anonymous_accesses}
                                     </span>
                                   )}
@@ -463,7 +473,7 @@ export function App() {
                                           ? `${Math.max(anonHeightPct, 10)}%`
                                           : '3px',
                                     }}
-                                    className={`w-full rounded-t-md transition-all ${
+                                    className={`w-full rounded-t-sm transition-all ${
                                       d.anonymous_accesses > 0
                                         ? 'bg-gradient-to-t from-sky-600 to-sky-400 shadow-sm shadow-sky-500/30'
                                         : 'bg-slate-800'
@@ -472,9 +482,9 @@ export function App() {
                                 </div>
 
                                 {/* Barra Registrados */}
-                                <div className="flex-1 max-w-[16px] h-full flex flex-col justify-end items-center">
+                                <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
                                   {d.registered_accesses > 0 && (
-                                    <span className="text-[10px] font-mono font-bold text-emerald-300 mb-0.5">
+                                    <span className="text-[9px] font-mono font-bold text-emerald-300 mb-0.5">
                                       {d.registered_accesses}
                                     </span>
                                   )}
@@ -485,9 +495,31 @@ export function App() {
                                           ? `${Math.max(regHeightPct, 10)}%`
                                           : '3px',
                                     }}
-                                    className={`w-full rounded-t-md transition-all ${
+                                    className={`w-full rounded-t-sm transition-all ${
                                       d.registered_accesses > 0
                                         ? 'bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-sm shadow-emerald-500/30'
+                                        : 'bg-slate-800'
+                                    }`}
+                                  />
+                                </div>
+
+                                {/* Barra Nuevos Registros */}
+                                <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
+                                  {signups > 0 && (
+                                    <span className="text-[9px] font-mono font-bold text-amber-300 mb-0.5">
+                                      {signups}
+                                    </span>
+                                  )}
+                                  <div
+                                    style={{
+                                      height:
+                                        signups > 0
+                                          ? `${Math.max(signupHeightPct, 10)}%`
+                                          : '3px',
+                                    }}
+                                    className={`w-full rounded-t-sm transition-all ${
+                                      signups > 0
+                                        ? 'bg-gradient-to-t from-amber-600 to-amber-400 shadow-sm shadow-amber-500/30'
                                         : 'bg-slate-800'
                                     }`}
                                   />
@@ -512,12 +544,14 @@ export function App() {
                             <th className="py-2.5 px-3.5">Día</th>
                             <th className="py-2.5 px-3.5 text-sky-300">Accesos Anónimos</th>
                             <th className="py-2.5 px-3.5 text-emerald-300">Accesos Registrados</th>
-                            <th className="py-2.5 px-3.5">Total Día</th>
-                            <th className="py-2.5 px-3.5 w-36">Proporción</th>
+                            <th className="py-2.5 px-3.5 text-amber-300">Nuevos Registros</th>
+                            <th className="py-2.5 px-3.5">Total Accesos</th>
+                            <th className="py-2.5 px-3.5 w-32">Proporción</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800/70">
                           {reversedDaily.map((d) => {
+                            const signups = d.new_registrations || 0;
                             const anonPct =
                               d.total_accesses > 0
                                 ? Math.round((d.anonymous_accesses / d.total_accesses) * 100)
@@ -548,6 +582,20 @@ export function App() {
                                   <span className="text-[11px] text-slate-400 ml-1.5">
                                     ({d.registered_unique} cuentas)
                                   </span>
+                                </td>
+                                <td className="py-2.5 px-3.5">
+                                  <span
+                                    className={`font-mono font-black text-sm ${
+                                      signups > 0 ? 'text-amber-400' : 'text-slate-500'
+                                    }`}
+                                  >
+                                    {signups}
+                                  </span>
+                                  {signups > 0 && (
+                                    <span className="text-[10px] font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 rounded-md ml-1.5">
+                                      +{signups} alta{signups === 1 ? '' : 's'}
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="py-2.5 px-3.5 font-mono font-bold text-white">
                                   {d.total_accesses}

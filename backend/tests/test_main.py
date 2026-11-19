@@ -119,6 +119,7 @@ class TestTelemetryBackend(unittest.TestCase):
         today_entry = data["futmad"]["daily_accesses"][-1]
         self.assertEqual(today_entry["anonymous_accesses"], 1)
         self.assertEqual(today_entry["registered_accesses"], 1)
+        self.assertEqual(today_entry["new_registrations"], 1)
         self.assertEqual(today_entry["total_accesses"], 2)
         self.assertEqual(data["georisk"]["unlock_clicks_total"], 1)
         self.assertEqual(data["georisk"]["unlock_by_plan"]["SINGLE_REPORT_699"], 1)

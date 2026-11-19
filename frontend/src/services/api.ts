@@ -22,6 +22,7 @@ export interface DailyAccessItem {
   date: string;
   anonymous_accesses: number;
   registered_accesses: number;
+  new_registrations: number;
   anonymous_unique: number;
   registered_unique: number;
   total_accesses: number;
