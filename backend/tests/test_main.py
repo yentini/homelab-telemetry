@@ -59,6 +59,17 @@ class TestTelemetryBackend(unittest.TestCase):
         )
         self.assertEqual(e1.status_code, 201)
 
+        e1_anon = self.client.post(
+            "/api/events",
+            json={
+                "app_id": "futmad",
+                "event_type": "session_start",
+                "visitor_id": "vis-futmad-anon-2",
+                "path": "/partidos",
+            },
+        )
+        self.assertEqual(e1_anon.status_code, 201)
+
         e2 = self.client.post(
             "/api/events",
             json={
@@ -101,9 +112,14 @@ class TestTelemetryBackend(unittest.TestCase):
 
         # Assert
         self.assertEqual(data["global_kpis"]["total_registered_users"], 1)
-        self.assertEqual(data["global_kpis"]["unique_visitors_24h"], 2)
+        self.assertEqual(data["global_kpis"]["unique_visitors_24h"], 3)
         self.assertEqual(data["global_kpis"]["errors_24h"], 1)
-        self.assertEqual(data["futmad"]["sessions_total"], 1)
+        self.assertEqual(data["futmad"]["sessions_total"], 2)
+        self.assertTrue(len(data["futmad"]["daily_accesses"]) >= 1)
+        today_entry = data["futmad"]["daily_accesses"][-1]
+        self.assertEqual(today_entry["anonymous_accesses"], 1)
+        self.assertEqual(today_entry["registered_accesses"], 1)
+        self.assertEqual(today_entry["total_accesses"], 2)
         self.assertEqual(data["georisk"]["unlock_clicks_total"], 1)
         self.assertEqual(data["georisk"]["unlock_by_plan"]["SINGLE_REPORT_699"], 1)
         self.assertEqual(len(data["georisk"]["recent_errors"]), 1)

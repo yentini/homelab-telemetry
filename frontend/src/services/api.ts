@@ -18,6 +18,15 @@ export interface FutmadUserItem {
   last_login_at?: string | null;
 }
 
+export interface DailyAccessItem {
+  date: string;
+  anonymous_accesses: number;
+  registered_accesses: number;
+  anonymous_unique: number;
+  registered_unique: number;
+  total_accesses: number;
+}
+
 export interface DokployServiceItem {
   id: string;
   name: string;
@@ -58,6 +67,7 @@ export interface DashboardOverview {
     unique_visitors_24h: number;
     sessions_total: number;
     events_by_type: Record<string, number>;
+    daily_accesses: DailyAccessItem[];
     users: FutmadUserItem[];
     recent_events: TelemetryEventItem[];
   };

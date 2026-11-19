@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
   Clock,
+  List,
   Lock,
   LogOut,
   Mail,
@@ -45,6 +47,7 @@ export function App() {
   const [isVerifying, setIsVerifying] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'global' | 'futmad' | 'georisk'>('global');
+  const [futmadAccessView, setFutmadAccessView] = useState<'both' | 'chart' | 'list'>('both');
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -339,6 +342,244 @@ export function App() {
                 </p>
               </div>
             </div>
+
+            {/* Accesos por Día: Personas Anónimas vs Personas Registradas (Modo Gráfico y Modo Lista) */}
+            {(() => {
+              const daily = data.futmad.daily_accesses || [];
+              const maxDayValue = Math.max(
+                1,
+                ...daily.map((d) => Math.max(d.anonymous_accesses, d.registered_accesses, 1))
+              );
+              const totalAnon14d = daily.reduce((acc, d) => acc + d.anonymous_accesses, 0);
+              const totalReg14d = daily.reduce((acc, d) => acc + d.registered_accesses, 0);
+              const reversedDaily = [...daily].reverse();
+
+              const formatShortDay = (ymd: string) => {
+                const parts = ymd.split('-');
+                return parts.length === 3 ? `${parts[2]}/${parts[1]}` : ymd;
+              };
+
+              const formatFullDay = (ymd: string) => {
+                const parts = ymd.split('-');
+                return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : ymd;
+              };
+
+              return (
+                <div className="bg-slate-900 border border-white/80 rounded-2xl p-4 sm:p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-rose-400" />
+                        <span>Accesos por Día: Personas Anónimas vs Registradas (Últimos 14 días)</span>
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Acumulado 14 días:{' '}
+                        <strong className="text-sky-400">{totalAnon14d} anónimos</strong> ·{' '}
+                        <strong className="text-emerald-400">{totalReg14d} registrados</strong>
+                      </p>
+                    </div>
+
+                    {/* Selector Modo Gráfico / Lista / Ambos */}
+                    <div className="inline-flex p-1 rounded-xl bg-slate-950 border border-slate-800 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setFutmadAccessView('both')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          futmadAccessView === 'both'
+                            ? 'bg-rose-600 text-white'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Ambos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFutmadAccessView('chart')}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          futmadAccessView === 'chart'
+                            ? 'bg-rose-600 text-white'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <BarChart3 className="w-3.5 h-3.5" />
+                        <span>Gráfico</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFutmadAccessView('list')}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          futmadAccessView === 'list'
+                            ? 'bg-rose-600 text-white'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <List className="w-3.5 h-3.5" />
+                        <span>Lista</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Leyenda */}
+                  <div className="flex flex-wrap items-center gap-4 text-xs">
+                    <span className="inline-flex items-center gap-1.5 text-sky-300 font-semibold">
+                      <span className="w-3 h-3 rounded-sm bg-sky-400 inline-block" />
+                      Accesos Personas Anónimas (`visitor_id` sin sesión)
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-emerald-300 font-semibold">
+                      <span className="w-3 h-3 rounded-sm bg-emerald-400 inline-block" />
+                      Accesos Personas Registradas (cuenta autenticada)
+                    </span>
+                  </div>
+
+                  {/* MODO GRÁFICO */}
+                  {(futmadAccessView === 'both' || futmadAccessView === 'chart') && (
+                    <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 pt-6 overflow-x-auto">
+                      <div className="min-w-[540px] h-48 flex items-end justify-between gap-2 pt-4 pb-2 border-b border-slate-800">
+                        {daily.map((d) => {
+                          const anonHeightPct = Math.round(
+                            (d.anonymous_accesses / maxDayValue) * 100
+                          );
+                          const regHeightPct = Math.round(
+                            (d.registered_accesses / maxDayValue) * 100
+                          );
+                          return (
+                            <div
+                              key={d.date}
+                              className="flex-1 flex flex-col items-center justify-end h-full group"
+                              title={`${formatFullDay(d.date)} · Anónimos: ${d.anonymous_accesses} · Registrados: ${d.registered_accesses}`}
+                            >
+                              <div className="w-full flex items-end justify-center gap-1 h-36 px-0.5">
+                                {/* Barra Anónimos */}
+                                <div className="flex-1 max-w-[16px] h-full flex flex-col justify-end items-center">
+                                  {d.anonymous_accesses > 0 && (
+                                    <span className="text-[10px] font-mono font-bold text-sky-300 mb-0.5">
+                                      {d.anonymous_accesses}
+                                    </span>
+                                  )}
+                                  <div
+                                    style={{
+                                      height:
+                                        d.anonymous_accesses > 0
+                                          ? `${Math.max(anonHeightPct, 10)}%`
+                                          : '3px',
+                                    }}
+                                    className={`w-full rounded-t-md transition-all ${
+                                      d.anonymous_accesses > 0
+                                        ? 'bg-gradient-to-t from-sky-600 to-sky-400 shadow-sm shadow-sky-500/30'
+                                        : 'bg-slate-800'
+                                    }`}
+                                  />
+                                </div>
+
+                                {/* Barra Registrados */}
+                                <div className="flex-1 max-w-[16px] h-full flex flex-col justify-end items-center">
+                                  {d.registered_accesses > 0 && (
+                                    <span className="text-[10px] font-mono font-bold text-emerald-300 mb-0.5">
+                                      {d.registered_accesses}
+                                    </span>
+                                  )}
+                                  <div
+                                    style={{
+                                      height:
+                                        d.registered_accesses > 0
+                                          ? `${Math.max(regHeightPct, 10)}%`
+                                          : '3px',
+                                    }}
+                                    className={`w-full rounded-t-md transition-all ${
+                                      d.registered_accesses > 0
+                                        ? 'bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-sm shadow-emerald-500/30'
+                                        : 'bg-slate-800'
+                                    }`}
+                                  />
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 mt-2">
+                                {formatShortDay(d.date)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* MODO LISTA */}
+                  {(futmadAccessView === 'both' || futmadAccessView === 'list') && (
+                    <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/70">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase bg-slate-950">
+                            <th className="py-2.5 px-3.5">Día</th>
+                            <th className="py-2.5 px-3.5 text-sky-300">Accesos Anónimos</th>
+                            <th className="py-2.5 px-3.5 text-emerald-300">Accesos Registrados</th>
+                            <th className="py-2.5 px-3.5">Total Día</th>
+                            <th className="py-2.5 px-3.5 w-36">Proporción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/70">
+                          {reversedDaily.map((d) => {
+                            const anonPct =
+                              d.total_accesses > 0
+                                ? Math.round((d.anonymous_accesses / d.total_accesses) * 100)
+                                : 0;
+                            const regPct =
+                              d.total_accesses > 0 ? 100 - anonPct : 0;
+
+                            return (
+                              <tr
+                                key={d.date}
+                                className="hover:bg-slate-900/60 transition-colors"
+                              >
+                                <td className="py-2.5 px-3.5 font-mono font-bold text-white">
+                                  {formatFullDay(d.date)}
+                                </td>
+                                <td className="py-2.5 px-3.5">
+                                  <span className="font-mono font-black text-sky-400 text-sm">
+                                    {d.anonymous_accesses}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400 ml-1.5">
+                                    ({d.anonymous_unique} únicos)
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3.5">
+                                  <span className="font-mono font-black text-emerald-400 text-sm">
+                                    {d.registered_accesses}
+                                  </span>
+                                  <span className="text-[11px] text-slate-400 ml-1.5">
+                                    ({d.registered_unique} cuentas)
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3.5 font-mono font-bold text-white">
+                                  {d.total_accesses}
+                                </td>
+                                <td className="py-2.5 px-3.5">
+                                  {d.total_accesses > 0 ? (
+                                    <div className="w-full h-2.5 rounded-full bg-slate-800 overflow-hidden flex">
+                                      <div
+                                        style={{ width: `${anonPct}%` }}
+                                        className="bg-sky-400 h-full"
+                                        title={`Anónimos: ${anonPct}%`}
+                                      />
+                                      <div
+                                        style={{ width: `${regPct}%` }}
+                                        className="bg-emerald-400 h-full"
+                                        title={`Registrados: ${regPct}%`}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] text-slate-600">Sin actividad</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Interacción por tipo de evento */}
             {Object.keys(data.futmad.events_by_type).length > 0 && (

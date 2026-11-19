@@ -196,6 +196,76 @@ def get_dashboard_overview(
     for e in futmad_events:
         futmad_by_type[e.event_type] = futmad_by_type.get(e.event_type, 0) + 1
 
+    # Daily accesses breakdown (last 14 days) for FutMad: Anonymous vs Registered
+    daily_map: Dict[str, Dict[str, Any]] = {}
+    for days_ago in range(13, -1, -1):
+        day_str = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        daily_map[day_str] = {
+            "date": day_str,
+            "anonymous_accesses": 0,
+            "registered_accesses": 0,
+            "anonymous_visitors": set(),
+            "registered_users": set(),
+        }
+
+    for e in futmad_events:
+        dt = _ensure_utc(e.created_at)
+        if not dt:
+            continue
+        day_str = dt.strftime("%Y-%m-%d")
+        if day_str not in daily_map:
+            daily_map[day_str] = {
+                "date": day_str,
+                "anonymous_accesses": 0,
+                "registered_accesses": 0,
+                "anonymous_visitors": set(),
+                "registered_users": set(),
+            }
+        bucket = daily_map[day_str]
+        is_registered = bool(e.user_email and e.user_email.strip())
+        if is_registered:
+            bucket["registered_users"].add(e.user_email.strip().lower())
+            if e.event_type in ("session_start", "auth_login", "auth_register"):
+                bucket["registered_accesses"] += 1
+        else:
+            bucket["anonymous_visitors"].add(e.visitor_id)
+            if e.event_type == "session_start":
+                bucket["anonymous_accesses"] += 1
+
+    # Also reflect registered users' created_at / last_login_at dates so historical days appear
+    for u in users_raw:
+        email_clean = u.email.strip().lower()
+        for ts in (_ensure_utc(u.created_at), _ensure_utc(u.last_login_at)):
+            if not ts:
+                continue
+            day_str = ts.strftime("%Y-%m-%d")
+            if day_str not in daily_map:
+                daily_map[day_str] = {
+                    "date": day_str,
+                    "anonymous_accesses": 0,
+                    "registered_accesses": 0,
+                    "anonymous_visitors": set(),
+                    "registered_users": set(),
+                }
+            bucket = daily_map[day_str]
+            if email_clean not in bucket["registered_users"]:
+                bucket["registered_users"].add(email_clean)
+                bucket["registered_accesses"] += 1
+
+    daily_accesses: List[Dict[str, Any]] = []
+    for day_str in sorted(daily_map.keys()):
+        b = daily_map[day_str]
+        anon_acc = max(b["anonymous_accesses"], len(b["anonymous_visitors"]))
+        reg_acc = max(b["registered_accesses"], len(b["registered_users"]))
+        daily_accesses.append({
+            "date": day_str,
+            "anonymous_accesses": anon_acc,
+            "registered_accesses": reg_acc,
+            "anonymous_unique": len(b["anonymous_visitors"]),
+            "registered_unique": len(b["registered_users"]),
+            "total_accesses": anon_acc + reg_acc,
+        })
+
     georisk_visitors_all = {e.visitor_id for e in georisk_events}
     georisk_visitors_24h = {
         e.visitor_id
@@ -242,6 +312,7 @@ def get_dashboard_overview(
             "unique_visitors_24h": len(futmad_visitors_24h),
             "sessions_total": futmad_by_type.get("session_start", 0),
             "events_by_type": futmad_by_type,
+            "daily_accesses": daily_accesses[-14:],
             "users": users_list,
             "recent_events": [_serialize_event(e) for e in futmad_events[:25]],
         },
