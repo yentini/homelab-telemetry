@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -48,6 +48,8 @@ export function App() {
 
   const [activeTab, setActiveTab] = useState<'global' | 'futmad' | 'georisk'>('global');
   const [futmadAccessView, setFutmadAccessView] = useState<'both' | 'chart' | 'list'>('both');
+  const [selectedChartDate, setSelectedChartDate] = useState<string | null>(null);
+  const chartScrollRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +77,18 @@ export function App() {
       loadData();
     }
   }, [token, loadData]);
+
+  // Enfocar y desplazar el gráfico al último día por defecto
+  useEffect(() => {
+    const daily = data?.futmad?.daily_accesses;
+    if (daily && daily.length > 0) {
+      const lastDay = daily[daily.length - 1].date;
+      setSelectedChartDate((prev) => prev || lastDay);
+    }
+    if (chartScrollRef.current) {
+      chartScrollRef.current.scrollLeft = chartScrollRef.current.scrollWidth;
+    }
+  }, [data, activeTab, futmadAccessView]);
 
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -440,100 +454,150 @@ export function App() {
                   </div>
 
                   {/* MODO GRÁFICO */}
-                  {(futmadAccessView === 'both' || futmadAccessView === 'chart') && (
-                    <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 pt-6 overflow-x-auto">
-                      <div className="min-w-[600px] h-48 flex items-end justify-between gap-2 pt-4 pb-2 border-b border-slate-800">
-                        {daily.map((d) => {
-                          const signups = d.new_registrations || 0;
-                          const anonHeightPct = Math.round(
-                            (d.anonymous_accesses / maxDayValue) * 100
-                          );
-                          const regHeightPct = Math.round(
-                            (d.registered_accesses / maxDayValue) * 100
-                          );
-                          const signupHeightPct = Math.round((signups / maxDayValue) * 100);
-                          return (
-                            <div
-                              key={d.date}
-                              className="flex-1 flex flex-col items-center justify-end h-full group"
-                              title={`${formatFullDay(d.date)} · Anónimos: ${d.anonymous_accesses} · Registrados: ${d.registered_accesses} · Nuevos Registros: ${signups}`}
-                            >
-                              <div className="w-full flex items-end justify-center gap-0.5 h-36 px-0.5">
-                                {/* Barra Anónimos */}
-                                <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
-                                  {d.anonymous_accesses > 0 && (
-                                    <span className="text-[9px] font-mono font-bold text-sky-300 mb-0.5">
-                                      {d.anonymous_accesses}
-                                    </span>
-                                  )}
-                                  <div
-                                    style={{
-                                      height:
-                                        d.anonymous_accesses > 0
-                                          ? `${Math.max(anonHeightPct, 10)}%`
-                                          : '3px',
-                                    }}
-                                    className={`w-full rounded-t-sm transition-all ${
-                                      d.anonymous_accesses > 0
-                                        ? 'bg-gradient-to-t from-sky-600 to-sky-400 shadow-sm shadow-sky-500/30'
-                                        : 'bg-slate-800'
-                                    }`}
-                                  />
-                                </div>
+                  {(futmadAccessView === 'both' || futmadAccessView === 'chart') && (() => {
+                    const lastDayDate = daily.length > 0 ? daily[daily.length - 1].date : null;
+                    const focusedDate = selectedChartDate || lastDayDate;
+                    const focusedDay =
+                      daily.find((item) => item.date === focusedDate) ||
+                      (daily.length > 0 ? daily[daily.length - 1] : null);
 
-                                {/* Barra Registrados */}
-                                <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
-                                  {d.registered_accesses > 0 && (
-                                    <span className="text-[9px] font-mono font-bold text-emerald-300 mb-0.5">
-                                      {d.registered_accesses}
-                                    </span>
-                                  )}
-                                  <div
-                                    style={{
-                                      height:
-                                        d.registered_accesses > 0
-                                          ? `${Math.max(regHeightPct, 10)}%`
-                                          : '3px',
-                                    }}
-                                    className={`w-full rounded-t-sm transition-all ${
-                                      d.registered_accesses > 0
-                                        ? 'bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-sm shadow-emerald-500/30'
-                                        : 'bg-slate-800'
-                                    }`}
-                                  />
-                                </div>
-
-                                {/* Barra Nuevos Registros */}
-                                <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
-                                  {signups > 0 && (
-                                    <span className="text-[9px] font-mono font-bold text-amber-300 mb-0.5">
-                                      {signups}
-                                    </span>
-                                  )}
-                                  <div
-                                    style={{
-                                      height:
-                                        signups > 0
-                                          ? `${Math.max(signupHeightPct, 10)}%`
-                                          : '3px',
-                                    }}
-                                    className={`w-full rounded-t-sm transition-all ${
-                                      signups > 0
-                                        ? 'bg-gradient-to-t from-amber-600 to-amber-400 shadow-sm shadow-amber-500/30'
-                                        : 'bg-slate-800'
-                                    }`}
-                                  />
-                                </div>
-                              </div>
-                              <span className="text-[10px] font-mono text-slate-400 mt-2">
-                                {formatShortDay(d.date)}
+                    return (
+                      <div className="space-y-2.5">
+                        {focusedDay && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-rose-500/40 text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold text-[11px]">
+                                {focusedDay.date === lastDayDate ? 'Último día (Hoy)' : 'Día seleccionado'}
+                              </span>
+                              <strong className="font-mono text-white text-sm">
+                                {formatFullDay(focusedDay.date)}
+                              </strong>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3 text-xs">
+                              <span className="text-sky-300">
+                                Anónimos: <strong className="font-mono text-white">{focusedDay.anonymous_accesses}</strong>
+                              </span>
+                              <span className="text-emerald-300">
+                                Registrados: <strong className="font-mono text-white">{focusedDay.registered_accesses}</strong>
+                              </span>
+                              <span className="text-amber-300">
+                                Nuevos registros: <strong className="font-mono text-white">{focusedDay.new_registrations || 0}</strong>
                               </span>
                             </div>
-                          );
-                        })}
+                          </div>
+                        )}
+
+                        <div
+                          ref={chartScrollRef}
+                          className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 pt-6 overflow-x-auto"
+                        >
+                          <div className="min-w-[600px] h-52 flex items-end justify-between gap-1.5 pt-4 pb-2 border-b border-slate-800">
+                            {daily.map((d) => {
+                              const signups = d.new_registrations || 0;
+                              const isFocused = d.date === focusedDate;
+                              const anonHeightPct = Math.round(
+                                (d.anonymous_accesses / maxDayValue) * 100
+                              );
+                              const regHeightPct = Math.round(
+                                (d.registered_accesses / maxDayValue) * 100
+                              );
+                              const signupHeightPct = Math.round((signups / maxDayValue) * 100);
+                              return (
+                                <button
+                                  type="button"
+                                  key={d.date}
+                                  onClick={() => setSelectedChartDate(d.date)}
+                                  className={`flex-1 flex flex-col items-center justify-end h-full rounded-xl px-1 py-1 transition-all cursor-pointer focus:outline-none ${
+                                    isFocused
+                                      ? 'bg-rose-500/15 ring-1 ring-rose-500/60 shadow-inner'
+                                      : 'hover:bg-slate-900/70'
+                                  }`}
+                                  title={`${formatFullDay(d.date)} · Anónimos: ${d.anonymous_accesses} · Registrados: ${d.registered_accesses} · Nuevos Registros: ${signups}`}
+                                >
+                                  <div className="w-full flex items-end justify-center gap-0.5 h-36 px-0.5">
+                                    {/* Barra Anónimos */}
+                                    <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
+                                      {d.anonymous_accesses > 0 && (
+                                        <span className="text-[9px] font-mono font-bold text-sky-300 mb-0.5">
+                                          {d.anonymous_accesses}
+                                        </span>
+                                      )}
+                                      <div
+                                        style={{
+                                          height:
+                                            d.anonymous_accesses > 0
+                                              ? `${Math.max(anonHeightPct, 10)}%`
+                                              : '3px',
+                                        }}
+                                        className={`w-full rounded-t-sm transition-all ${
+                                          d.anonymous_accesses > 0
+                                            ? 'bg-gradient-to-t from-sky-600 to-sky-400 shadow-sm shadow-sky-500/30'
+                                            : 'bg-slate-800'
+                                        }`}
+                                      />
+                                    </div>
+
+                                    {/* Barra Registrados */}
+                                    <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
+                                      {d.registered_accesses > 0 && (
+                                        <span className="text-[9px] font-mono font-bold text-emerald-300 mb-0.5">
+                                          {d.registered_accesses}
+                                        </span>
+                                      )}
+                                      <div
+                                        style={{
+                                          height:
+                                            d.registered_accesses > 0
+                                              ? `${Math.max(regHeightPct, 10)}%`
+                                              : '3px',
+                                        }}
+                                        className={`w-full rounded-t-sm transition-all ${
+                                          d.registered_accesses > 0
+                                            ? 'bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-sm shadow-emerald-500/30'
+                                            : 'bg-slate-800'
+                                        }`}
+                                      />
+                                    </div>
+
+                                    {/* Barra Nuevos Registros */}
+                                    <div className="flex-1 max-w-[13px] h-full flex flex-col justify-end items-center">
+                                      {signups > 0 && (
+                                        <span className="text-[9px] font-mono font-bold text-amber-300 mb-0.5">
+                                          {signups}
+                                        </span>
+                                      )}
+                                      <div
+                                        style={{
+                                          height:
+                                            signups > 0
+                                              ? `${Math.max(signupHeightPct, 10)}%`
+                                              : '3px',
+                                        }}
+                                        className={`w-full rounded-t-sm transition-all ${
+                                          signups > 0
+                                            ? 'bg-gradient-to-t from-amber-600 to-amber-400 shadow-sm shadow-amber-500/30'
+                                            : 'bg-slate-800'
+                                        }`}
+                                      />
+                                    </div>
+                                  </div>
+                                  <span
+                                    className={`text-[10px] font-mono mt-2 px-1.5 py-0.5 rounded-md ${
+                                      isFocused
+                                        ? 'bg-rose-500 text-white font-bold'
+                                        : 'text-slate-400'
+                                    }`}
+                                  >
+                                    {formatShortDay(d.date)}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* MODO LISTA */}
                   {(futmadAccessView === 'both' || futmadAccessView === 'list') && (
