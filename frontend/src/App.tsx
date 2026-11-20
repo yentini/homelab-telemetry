@@ -507,7 +507,12 @@ export function App() {
                                 )}
                               </span>
                             ) : (
-                              <span className="text-slate-500">—</span>
+                              <span
+                                className="text-slate-500 text-[11px]"
+                                title="El kernel de la Raspberry Pi requiere cgroup_enable=memory en cmdline.txt para reportar RAM por contenedor"
+                              >
+                                N/D (cgroup)
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -1040,7 +1045,12 @@ export function App() {
                                 )}
                               </span>
                             ) : (
-                              <span className="text-slate-500">—</span>
+                              <span
+                                className="text-slate-500 text-[11px]"
+                                title="El kernel de la Raspberry Pi requiere cgroup_enable=memory en cmdline.txt para reportar RAM por contenedor"
+                              >
+                                N/D (cgroup)
+                              </span>
                             )}
                           </td>
                         </tr>

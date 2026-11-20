@@ -92,7 +92,10 @@ def fetch_dokploy_snapshot() -> Dict[str, Any]:
             running_count = len(docker_stats)
 
         containers_list.sort(
-            key=lambda x: (x.get("memory_mb") is not None, x.get("memory_mb") or 0.0),
+            key=lambda x: (
+                x.get("memory_mb") or 0.0,
+                x.get("cpu_percent") or 0.0,
+            ),
             reverse=True,
         )
         total_cpu = round(sum(c.get("cpu_percent") or 0.0 for c in containers_list), 1)

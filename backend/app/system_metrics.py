@@ -152,7 +152,7 @@ def fetch_raspberry_metrics(
     cpu_percent: Optional[float] = None
     first = _parse_proc_stat_cpu(proc_path)
     if first:
-        time.sleep(0.12)
+        time.sleep(0.25)
         second = _parse_proc_stat_cpu(proc_path)
         if second:
             total_delta = second[0] - first[0]
@@ -220,7 +220,9 @@ def fetch_raspberry_metrics(
     }
 
 
-def compute_container_usage(stats: Dict[str, Any]) -> Tuple[float, float, float, float]:
+def compute_container_usage(
+    stats: Dict[str, Any],
+) -> Tuple[float, Optional[float], Optional[float], Optional[float]]:
     """Compute (cpu_percent, mem_mb, mem_limit_mb, mem_percent) from Docker stats JSON."""
     cpu_stats = stats.get("cpu_stats") or {}
     precpu_stats = stats.get("precpu_stats") or {}
@@ -243,15 +245,18 @@ def compute_container_usage(stats: Dict[str, Any]) -> Tuple[float, float, float,
     )
 
     mem_stats = stats.get("memory_stats") or {}
-    raw_usage = mem_stats.get("usage") or 0
+    raw_usage = mem_stats.get("usage")
+    if raw_usage is None:
+        return cpu_percent, None, None, None
+
     detailed = mem_stats.get("stats") or {}
     cache = detailed.get("inactive_file") or detailed.get("cache") or 0
     used_bytes = max(0, raw_usage - cache)
     limit_bytes = mem_stats.get("limit") or 0
 
     mem_mb = round(used_bytes / (1024 * 1024), 1)
-    mem_limit_mb = round(limit_bytes / (1024 * 1024), 1)
-    mem_percent = round((used_bytes / limit_bytes) * 100.0, 2) if limit_bytes > 0 else 0.0
+    mem_limit_mb = round(limit_bytes / (1024 * 1024), 1) if limit_bytes > 0 else None
+    mem_percent = round((used_bytes / limit_bytes) * 100.0, 2) if limit_bytes > 0 else None
     return cpu_percent, mem_mb, mem_limit_mb, mem_percent
 
 
@@ -302,7 +307,10 @@ def fetch_docker_container_stats(
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(_inspect_one, containers))
-        results.sort(key=lambda x: x["memory_mb"], reverse=True)
+        results.sort(
+            key=lambda x: (x.get("memory_mb") or 0.0, x.get("cpu_percent") or 0.0),
+            reverse=True,
+        )
         return results
     except Exception:
         return []
