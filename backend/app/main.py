@@ -15,6 +15,7 @@ from app.auth import create_admin_token, require_admin, verify_admin_pin
 from app.database import get_db, init_db
 from app.dokploy_client import fetch_dokploy_snapshot
 from app.models import RffmUserModel, TelemetryEventModel
+from app.system_metrics import fetch_raspberry_metrics
 
 
 @asynccontextmanager
@@ -196,18 +197,28 @@ def get_dashboard_overview(
     for e in futmad_events:
         futmad_by_type[e.event_type] = futmad_by_type.get(e.event_type, 0) + 1
 
+    user_name_by_email: Dict[str, str] = {}
+    for u in users_raw:
+        email_clean = u.email.strip().lower()
+        if u.name and u.name.strip():
+            user_name_by_email[email_clean] = u.name.strip()
+
     # Daily accesses & registrations breakdown (last 14 days) for FutMad
-    daily_map: Dict[str, Dict[str, Any]] = {}
-    for days_ago in range(13, -1, -1):
-        day_str = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
-        daily_map[day_str] = {
+    def _new_day_bucket(day_str: str) -> Dict[str, Any]:
+        return {
             "date": day_str,
             "anonymous_accesses": 0,
             "registered_accesses": 0,
             "new_registrations": 0,
             "anonymous_visitors": set(),
             "registered_users": set(),
+            "registered_users_counts": {},
         }
+
+    daily_map: Dict[str, Dict[str, Any]] = {}
+    for days_ago in range(13, -1, -1):
+        day_str = (now - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        daily_map[day_str] = _new_day_bucket(day_str)
 
     for e in futmad_events:
         dt = _ensure_utc(e.created_at)
@@ -215,20 +226,16 @@ def get_dashboard_overview(
             continue
         day_str = dt.strftime("%Y-%m-%d")
         if day_str not in daily_map:
-            daily_map[day_str] = {
-                "date": day_str,
-                "anonymous_accesses": 0,
-                "registered_accesses": 0,
-                "new_registrations": 0,
-                "anonymous_visitors": set(),
-                "registered_users": set(),
-            }
+            daily_map[day_str] = _new_day_bucket(day_str)
         bucket = daily_map[day_str]
         is_registered = bool(e.user_email and e.user_email.strip())
         if is_registered:
-            bucket["registered_users"].add(e.user_email.strip().lower())
+            email_clean = e.user_email.strip().lower()
+            bucket["registered_users"].add(email_clean)
             if e.event_type in ("session_start", "auth_login", "auth_register"):
                 bucket["registered_accesses"] += 1
+                counts_map = bucket["registered_users_counts"]
+                counts_map[email_clean] = counts_map.get(email_clean, 0) + 1
         else:
             bucket["anonymous_visitors"].add(e.visitor_id)
             if e.event_type == "session_start":
@@ -241,14 +248,7 @@ def get_dashboard_overview(
         if created_ts:
             c_day = created_ts.strftime("%Y-%m-%d")
             if c_day not in daily_map:
-                daily_map[c_day] = {
-                    "date": c_day,
-                    "anonymous_accesses": 0,
-                    "registered_accesses": 0,
-                    "new_registrations": 0,
-                    "anonymous_visitors": set(),
-                    "registered_users": set(),
-                }
+                daily_map[c_day] = _new_day_bucket(c_day)
             daily_map[c_day]["new_registrations"] += 1
 
         for ts in (created_ts, _ensure_utc(u.last_login_at)):
@@ -256,24 +256,31 @@ def get_dashboard_overview(
                 continue
             day_str = ts.strftime("%Y-%m-%d")
             if day_str not in daily_map:
-                daily_map[day_str] = {
-                    "date": day_str,
-                    "anonymous_accesses": 0,
-                    "registered_accesses": 0,
-                    "new_registrations": 0,
-                    "anonymous_visitors": set(),
-                    "registered_users": set(),
-                }
+                daily_map[day_str] = _new_day_bucket(day_str)
             bucket = daily_map[day_str]
             if email_clean not in bucket["registered_users"]:
                 bucket["registered_users"].add(email_clean)
                 bucket["registered_accesses"] += 1
+                counts_map = bucket["registered_users_counts"]
+                counts_map[email_clean] = counts_map.get(email_clean, 0) + 1
 
     daily_accesses: List[Dict[str, Any]] = []
     for day_str in sorted(daily_map.keys()):
         b = daily_map[day_str]
         anon_acc = max(b["anonymous_accesses"], len(b["anonymous_visitors"]))
         reg_acc = max(b["registered_accesses"], len(b["registered_users"]))
+        counts_map = b["registered_users_counts"]
+        reg_users_detail = sorted(
+            [
+                {
+                    "email": email,
+                    "name": user_name_by_email.get(email),
+                    "count": counts_map.get(email, 1),
+                }
+                for email in b["registered_users"]
+            ],
+            key=lambda item: (-item["count"], item["email"]),
+        )
         daily_accesses.append({
             "date": day_str,
             "anonymous_accesses": anon_acc,
@@ -281,8 +288,32 @@ def get_dashboard_overview(
             "new_registrations": b["new_registrations"],
             "anonymous_unique": len(b["anonymous_visitors"]),
             "registered_unique": len(b["registered_users"]),
+            "registered_users_detail": reg_users_detail,
             "total_accesses": anon_acc + reg_acc,
         })
+
+    # Per-user total registered accesses across the last 14 days
+    recent_14d = daily_accesses[-14:]
+    user_access_totals: Dict[str, int] = {}
+    for day_item in recent_14d:
+        for detail in day_item["registered_users_detail"]:
+            em = detail["email"]
+            user_access_totals[em] = user_access_totals.get(em, 0) + detail["count"]
+
+    for u_item in users_list:
+        u_item["access_count_14d"] = user_access_totals.get(u_item["email"].strip().lower(), 0)
+
+    registered_user_accesses = sorted(
+        [
+            {
+                "email": em,
+                "name": user_name_by_email.get(em),
+                "access_count": cnt,
+            }
+            for em, cnt in user_access_totals.items()
+        ],
+        key=lambda item: (-item["access_count"], item["email"]),
+    )
 
     georisk_visitors_all = {e.visitor_id for e in georisk_events}
     georisk_visitors_24h = {
@@ -321,6 +352,7 @@ def get_dashboard_overview(
             "errors_24h": total_errors_24h,
         },
         "dokploy": fetch_dokploy_snapshot(),
+        "raspberry": fetch_raspberry_metrics(),
         "futmad": {
             "registered_users_total": len(users_list),
             "active_users_24h": active_users_24h,
@@ -330,7 +362,8 @@ def get_dashboard_overview(
             "unique_visitors_24h": len(futmad_visitors_24h),
             "sessions_total": futmad_by_type.get("session_start", 0),
             "events_by_type": futmad_by_type,
-            "daily_accesses": daily_accesses[-14:],
+            "daily_accesses": recent_14d,
+            "registered_user_accesses": registered_user_accesses,
             "users": users_list,
             "recent_events": [_serialize_event(e) for e in futmad_events[:25]],
         },

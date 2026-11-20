@@ -16,6 +16,19 @@ export interface FutmadUserItem {
   auth_provider: string;
   created_at?: string | null;
   last_login_at?: string | null;
+  access_count_14d?: number;
+}
+
+export interface RegisteredUserDayDetail {
+  email: string;
+  name?: string | null;
+  count: number;
+}
+
+export interface RegisteredUserAccessSummary {
+  email: string;
+  name?: string | null;
+  access_count: number;
 }
 
 export interface DailyAccessItem {
@@ -25,7 +38,35 @@ export interface DailyAccessItem {
   new_registrations: number;
   anonymous_unique: number;
   registered_unique: number;
+  registered_users_detail?: RegisteredUserDayDetail[];
   total_accesses: number;
+}
+
+export interface DokployContainerItem {
+  name: string;
+  state: string;
+  status: string;
+  cpu_percent?: number | null;
+  memory_mb?: number | null;
+  memory_limit_mb?: number | null;
+  memory_percent?: number | null;
+}
+
+export interface RaspberryMetrics {
+  available: boolean;
+  cpu_percent?: number | null;
+  cpu_cores?: number | null;
+  load_1m?: number | null;
+  ram_used_mb?: number | null;
+  ram_total_mb?: number | null;
+  ram_percent?: number | null;
+  temperature_c?: number | null;
+  uptime_formatted?: string | null;
+  fan_detected?: boolean;
+  fan_active?: boolean | null;
+  fan_rpm?: number | null;
+  fan_level?: number | null;
+  fan_status?: string;
 }
 
 export interface DokployServiceItem {
@@ -57,8 +98,11 @@ export interface DashboardOverview {
     projects: DokployProjectItem[];
     containers_running: number;
     containers_total: number;
-    containers: Array<{ name: string; state: string; status: string }>;
+    total_cpu_percent?: number;
+    total_memory_mb?: number;
+    containers: DokployContainerItem[];
   };
+  raspberry?: RaspberryMetrics;
   futmad: {
     registered_users_total: number;
     active_users_24h: number;
@@ -69,6 +113,7 @@ export interface DashboardOverview {
     sessions_total: number;
     events_by_type: Record<string, number>;
     daily_accesses: DailyAccessItem[];
+    registered_user_accesses?: RegisteredUserAccessSummary[];
     users: FutmadUserItem[];
     recent_events: TelemetryEventItem[];
   };
